@@ -315,7 +315,65 @@ export default function App() {
       .map((p) => p.id);
     cargarStickers(visibles);
   }, [currentIndex, paginas]);
+  // --- SUSCRIPCIÓN A WEBSOCKETS (SUPABASE REALTIME) ---
+  useEffect(() => {
+    // Suscribirse a los cambios de la tabla 'stickers'
+    const channelStickers = supabase
+      .channel("cambios-stickers")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stickers" },
+        (payload) => {
+          console.log("Cambio en stickers detectado:", payload);
 
+          if (payload.eventType === "INSERT") {
+            setStickers((prev) => {
+              // Evitar duplicados si el usuario actual fue quien lo insertó
+              if (prev.find((s) => s.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === "UPDATE") {
+            setStickers((prev) =>
+              prev.map((s) => (s.id === payload.new.id ? payload.new : s)),
+            );
+          } else if (payload.eventType === "DELETE") {
+            setStickers((prev) => prev.filter((s) => s.id !== payload.old.id));
+          }
+        },
+      )
+      .subscribe();
+
+    // (Opcional) Suscribirse a los cambios de la tabla 'paginas'
+    const channelPaginas = supabase
+      .channel("cambios-paginas")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "paginas" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setPaginas((prev) =>
+              [...prev, payload.new].sort((a, b) => a.orden - b.orden),
+            );
+          } else if (payload.eventType === "UPDATE") {
+            setPaginas((prev) =>
+              prev
+                .map((p) => (p.id === payload.new.id ? payload.new : p))
+                .sort((a, b) => a.orden - b.orden),
+            );
+          } else if (payload.eventType === "DELETE") {
+            setPaginas((prev) => prev.filter((p) => p.id !== payload.old.id));
+          }
+        },
+      )
+      .subscribe();
+
+    // Limpiar los WebSockets cuando el componente se desmonte
+    return () => {
+      supabase.removeChannel(channelStickers);
+      supabase.removeChannel(channelPaginas);
+    };
+  }, []);
+  // ----------------------------------------------------
   function guardarCambiosConfirmados(id, nuevosDatos) {
     setStickers((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...nuevosDatos } : s)),
