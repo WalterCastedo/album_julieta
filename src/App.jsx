@@ -308,6 +308,14 @@ export default function App() {
     init();
   }, []);
 
+  useEffect(() => {
+    if (!paginas.length) return;
+    const visibles = paginas
+      .slice(Math.max(0, currentIndex - 2), currentIndex + 4)
+      .map((p) => p.id);
+    cargarStickers(visibles);
+  }, [currentIndex, paginas]);
+  // --- SUSCRIPCIÓN A WEBSOCKETS (SUPABASE REALTIME) ---
   // --- SUSCRIPCIÓN A WEBSOCKETS (SUPABASE REALTIME) ---
   useEffect(() => {
     // 1. Suscribirse a los cambios de la tabla 'stickers'
@@ -364,8 +372,17 @@ export default function App() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "album" },
         (payload) => {
-          // Actualizamos el estado del álbum con el nuevo título o portada
           setAlbum(payload.new);
+          // Si el cambio trae configuración, la aplicamos con tus nombres
+          if (payload.new.titulo_color) {
+            setConfigPortada({
+              color: payload.new.titulo_color,
+              size: payload.new.titulo_size || 48,
+              font: payload.new.titulo_font || "sans-serif",
+              vertical: payload.new.titulo_pos_y || "center",
+              horizontal: payload.new.titulo_align || "center",
+            });
+          }
         },
       )
       .subscribe();
@@ -424,14 +441,52 @@ export default function App() {
       .select("*")
       .limit(1)
       .single();
-    if (!error) setAlbum(data);
+    if (!error) {
+      setAlbum(data);
+      // Sincronizar configuración si existe en la BD usando tus nombres
+      if (data.titulo_color) {
+        setConfigPortada({
+          color: data.titulo_color,
+          size: data.titulo_size || 48,
+          font: data.titulo_font || "sans-serif",
+          vertical: data.titulo_pos_y || "center",
+          horizontal: data.titulo_align || "center",
+        });
+      }
+    }
   }
-
   async function actualizarTitulo(titulo) {
     setAlbum((prev) => ({ ...prev, titulo }));
     await supabase.from("album").update({ titulo }).eq("id", album.id);
   }
+  // Ref para el debounce de la configuración
+  const configTimeoutRef = useRef(null);
 
+  function actualizarConfigPortada(clave, valor) {
+    setConfigPortada((prev) => {
+      const nuevaConfig = { ...prev, [clave]: valor };
+
+      if (configTimeoutRef.current) clearTimeout(configTimeoutRef.current);
+
+      configTimeoutRef.current = setTimeout(async () => {
+        if (!album?.id) return;
+
+        // AQUÍ USAMOS TUS NOMBRES EXACTOS DE COLUMNA
+        await supabase
+          .from("album")
+          .update({
+            titulo_color: nuevaConfig.color,
+            titulo_size: nuevaConfig.size,
+            titulo_font: nuevaConfig.font,
+            titulo_pos_y: nuevaConfig.vertical,
+            titulo_align: nuevaConfig.horizontal,
+          })
+          .eq("id", album.id);
+      }, 500);
+
+      return nuevaConfig;
+    });
+  }
   async function subirPortada(file) {
     if (!file) return;
     const imagen = await convertirAJPG(file, 1600, 0.7);
@@ -1248,9 +1303,7 @@ export default function App() {
           <input
             type="color"
             value={configPortada.color}
-            onChange={(e) =>
-              setConfigPortada((prev) => ({ ...prev, color: e.target.value }))
-            }
+            onChange={(e) => actualizarConfigPortada("color", e.target.value)}
             className="w-8 h-8 rounded cursor-pointer shrink-0"
           />
           <input
@@ -1259,18 +1312,13 @@ export default function App() {
             max="90"
             value={configPortada.size}
             onChange={(e) =>
-              setConfigPortada((prev) => ({
-                ...prev,
-                size: Number(e.target.value),
-              }))
+              actualizarConfigPortada("size", Number(e.target.value))
             }
             className="w-[70px] shrink-0"
           />
           <select
             value={configPortada.font}
-            onChange={(e) =>
-              setConfigPortada((prev) => ({ ...prev, font: e.target.value }))
-            }
+            onChange={(e) => actualizarConfigPortada("font", e.target.value)}
             className="bg-slate-950 px-2 py-1.5 rounded text-xs shrink-0"
           >
             <option value="sans-serif">Sans</option>
@@ -1281,10 +1329,7 @@ export default function App() {
           <select
             value={configPortada.vertical}
             onChange={(e) =>
-              setConfigPortada((prev) => ({
-                ...prev,
-                vertical: e.target.value,
-              }))
+              actualizarConfigPortada("vertical", e.target.value)
             }
             className="bg-slate-950 px-2 py-1.5 rounded text-xs shrink-0"
           >
@@ -1295,10 +1340,7 @@ export default function App() {
           <select
             value={configPortada.horizontal}
             onChange={(e) =>
-              setConfigPortada((prev) => ({
-                ...prev,
-                horizontal: e.target.value,
-              }))
+              actualizarConfigPortada("horizontal", e.target.value)
             }
             className="bg-slate-950 px-2 py-1.5 rounded text-xs shrink-0"
           >
